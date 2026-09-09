@@ -4,15 +4,17 @@ import (
 	"encoding/json"
 )
 
+// Endpoint has no tls_id, unlike Inbound and Service. OpenConnect and OpenVPN
+// each define their own TLS options with their own field names, their own
+// vocabulary (an OpenVPN server names the client CA `client_certificate`) and
+// settings the panel's TLS config cannot express at all, control_wrap among
+// them. A shared template projected onto them was misleading at best and, for
+// OpenVPN, never produced a config sing-box would accept. Those endpoints carry
+// their own `tls` object in Options instead, written in sing-box's own names.
 type Endpoint struct {
 	Id   uint   `json:"id" form:"id" gorm:"primaryKey;autoIncrement"`
 	Type string `json:"type" form:"type"`
 	Tag  string `json:"tag" form:"tag" gorm:"unique"`
-
-	// Foreign key to tls table. Only the endpoint types that terminate or
-	// present TLS themselves use it; see projectEndpointTLS.
-	TlsId uint `json:"tls_id" form:"tls_id"`
-	Tls   *Tls `json:"tls" form:"tls" gorm:"foreignKey:TlsId;references:Id"`
 
 	Options json.RawMessage `json:"-" form:"-"`
 	Ext     json.RawMessage `json:"ext" form:"ext"`
@@ -34,11 +36,10 @@ func (o *Endpoint) UnmarshalJSON(data []byte) error {
 	delete(raw, "type")
 	o.Tag = raw["tag"].(string)
 	delete(raw, "tag")
-	if val, exists := raw["tls_id"].(float64); exists {
-		o.TlsId = uint(val)
-	}
+	// Dropped rather than stored: an older panel sent tls_id alongside the
+	// endpoint, and sing-box rejects the unknown key. `tls` is kept, since it
+	// is now the endpoint's own.
 	delete(raw, "tls_id")
-	delete(raw, "tls")
 	o.Ext, _ = json.MarshalIndent(raw["ext"], "", "  ")
 	delete(raw, "ext")
 
@@ -67,20 +68,6 @@ func (o Endpoint) MarshalJSON() ([]byte, error) {
 
 		for k, v := range restFields {
 			combined[k] = v
-		}
-	}
-
-	// A referenced TLS config is the explicit choice, so it replaces whatever
-	// TLS fields the endpoint carries inline rather than losing to them.
-	if o.Tls != nil {
-		projected, err := projectEndpointTLS(o.Type, o.Tls)
-		if err != nil {
-			return nil, err
-		}
-		if projected != nil {
-			combined["tls"] = projected
-		} else {
-			delete(combined, "tls")
 		}
 	}
 

@@ -144,6 +144,10 @@ func InitDB(dbPath string) error {
 	if err != nil {
 		return err
 	}
+	err = migrateEndpointTls()
+	if err != nil {
+		return err
+	}
 	reportSingBox114Manual()
 
 	return nil

@@ -82,59 +82,63 @@ func TestEndpointDefaults(t *testing.T) {
 	}
 }
 
-// TestEndpointPanelTLS builds an endpoint the way the panel does: from a stored
-// model.Endpoint carrying a tls_id, whose TLS row is projected into whatever
-// shape that endpoint type accepts. It proves the projection produces something
-// sing-box actually takes, which a unit test over the mapping alone cannot.
-func TestEndpointPanelTLS(t *testing.T) {
+// TestEndpointInlineTLS builds the TLS-bearing endpoints from the `tls` object
+// the panel UI now writes, in sing-box's own field names. It covers the shapes
+// the OpenVPN and OpenConnect forms produce, control_wrap among them, which is
+// the setting a shared panel TLS config could never express (#1253).
+func TestEndpointInlineTLS(t *testing.T) {
 	certPath, keyPath := writeTestCert(t)
-
-	// A TLS row as the panel stores it, `enabled` and all.
-	tlsRow := &model.Tls{
-		Name: "panel-cert",
-		Server: json.RawMessage(`{
-			"enabled": true,
-			"server_name": "vpn.example.com",
-			"alpn": ["h2"],
-			"certificate_path": ` + strconv.Quote(certPath) + `,
-			"key_path": ` + strconv.Quote(keyPath) + `
-		}`),
-		Client: json.RawMessage(`{
-			"enabled": true,
-			"server_name": "vpn.example.com",
-			"utls": {"enabled": true, "fingerprint": "chrome"},
-			"certificate_path": ` + strconv.Quote(certPath) + `
-		}`),
-	}
+	quotedCert, quotedKey := strconv.Quote(certPath), strconv.Quote(keyPath)
 
 	testCases := []struct {
 		name     string
 		endpoint model.Endpoint
 	}{
+		// The server presents `certificate`/`key` and verifies clients against
+		// `client_certificate`, which is the opposite of what those two names
+		// mean on the client below.
 		{name: "openvpn-server", endpoint: model.Endpoint{
-			Type: "openvpn-server", Tag: "ovs-tls", TlsId: 1, Tls: tlsRow,
-			Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":44101,"mode":"tls","network":"udp","address":["10.8.0.1/24"]}`),
+			Type: "openvpn-server", Tag: "ovs-tls",
+			Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":44101,"mode":"tls","network":"udp","address":["10.8.0.1/24"],
+				"tls":{"certificate_path":` + quotedCert + `,"key_path":` + quotedKey + `}}`),
 		}},
-		{name: "openvpn-client", endpoint: model.Endpoint{
-			Type: "openvpn-client", Tag: "ovc-tls", TlsId: 1, Tls: tlsRow,
-			Options: json.RawMessage(`{"server":"vpn.example.com","server_port":1194,"mode":"tls","network":"udp"}`),
-		}},
-		{name: "openconnect", endpoint: model.Endpoint{
-			Type: "openconnect", Tag: "oc-tls", TlsId: 1, Tls: tlsRow,
-			Options: json.RawMessage(`{"server":"vpn.example.com","flavor":"anyconnect"}`),
-		}},
-		// mutual TLS: the panel stores client CA paths as a list and names
-		// verification differently, so both are converted on the way in.
 		{name: "openvpn-server-mtls", endpoint: model.Endpoint{
-			Type: "openvpn-server", Tag: "ovs-mtls", TlsId: 2,
-			Tls: &model.Tls{Name: "panel-mtls", Server: json.RawMessage(`{
-				"enabled": true,
-				"certificate_path": ` + strconv.Quote(certPath) + `,
-				"key_path": ` + strconv.Quote(keyPath) + `,
-				"client_authentication": "require-and-verify",
-				"client_certificate_path": [` + strconv.Quote(certPath) + `]
-			}`)},
-			Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":44102,"mode":"tls","network":"udp","address":["10.8.0.1/24"]}`),
+			Type: "openvpn-server", Tag: "ovs-mtls",
+			Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":44102,"mode":"tls","network":"udp","address":["10.8.0.1/24"],
+				"tls":{"certificate_path":` + quotedCert + `,"key_path":` + quotedKey + `,
+					"client_certificate_path":` + quotedCert + `,"verify_client_certificate":"require"}}`),
+		}},
+		// tls-crypt wraps the control channel in a pre-shared key. Nearly every
+		// real deployment uses one.
+		{name: "openvpn-server-control-wrap", endpoint: model.Endpoint{
+			Type: "openvpn-server", Tag: "ovs-wrap",
+			Options: json.RawMessage(`{"listen":"127.0.0.1","listen_port":44103,"mode":"tls","network":"udp","address":["10.8.0.1/24"],
+				"tls":{"certificate_path":` + quotedCert + `,"key_path":` + quotedKey + `,
+					"control_wrap":{"type":"tls_crypt","key_path":` + quotedKey + `}}}`),
+		}},
+		// On the client `certificate` is the CA it checks the server against.
+		{name: "openvpn-client", endpoint: model.Endpoint{
+			Type: "openvpn-client", Tag: "ovc-tls",
+			Options: json.RawMessage(`{"server":"vpn.example.com","server_port":1194,"mode":"tls","network":"udp",
+				"tls":{"certificate_path":` + quotedCert + `,"version_min":"1.2"}}`),
+		}},
+		{name: "openvpn-client-mtls", endpoint: model.Endpoint{
+			Type: "openvpn-client", Tag: "ovc-mtls",
+			Options: json.RawMessage(`{"server":"vpn.example.com","server_port":1194,"mode":"tls","network":"udp",
+				"tls":{"certificate_path":` + quotedCert + `,"client_certificate_path":` + quotedCert + `,
+					"client_key_path":` + quotedKey + `,"remote_certificate_tls":"server"}}`),
+		}},
+		// A peer fingerprint stands in for a certificate authority.
+		{name: "openvpn-client-fingerprint", endpoint: model.Endpoint{
+			Type: "openvpn-client", Tag: "ovc-pin",
+			Options: json.RawMessage(`{"server":"vpn.example.com","server_port":1194,"mode":"tls","network":"udp",
+				"tls":{"peer_fingerprint":["030a11181f262d343b424950575e656c737a81888f969da4abb2b9c0c7ced5dc"]}}`),
+		}},
+		// OpenConnect names the trust anchor after its role.
+		{name: "openconnect", endpoint: model.Endpoint{
+			Type: "openconnect", Tag: "oc-tls",
+			Options: json.RawMessage(`{"server":"vpn.example.com","flavor":"anyconnect",
+				"tls":{"certificate_authority_path":` + quotedCert + `,"server_name":"vpn.example.com"}}`),
 		}},
 	}
 
@@ -157,12 +161,12 @@ func TestEndpointPanelTLS(t *testing.T) {
 				EndpointRegistry(), DNSTransportRegistry(), ServiceRegistry(), CertificateProviderRegistry())
 			var options option.Options
 			if err = options.UnmarshalJSONContext(ctx, raw); err != nil {
-				t.Fatalf("parse (projected tls was %s): %v", endpointJSON, err)
+				t.Fatalf("parse (endpoint was %s): %v", endpointJSON, err)
 			}
 			instance, err := NewBox(Options{Context: ctx, Options: options})
 			skipIfFeatureMissing(t, err)
 			if err != nil {
-				t.Fatalf("build: %v", err)
+				t.Fatalf("build (endpoint was %s): %v", endpointJSON, err)
 			}
 			instance.Close()
 		})
