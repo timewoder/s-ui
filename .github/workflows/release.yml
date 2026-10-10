@@ -92,6 +92,17 @@ jobs:
           cache: false
           go-version-file: go.mod
 
+      - name: Locate Go module cache
+        id: go-env
+        run: echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go module cache
+        id: go-mod-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ steps.go-env.outputs.modcache }}
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+
       - name: Resolve cronet-go commit
         if: matrix.naive
         run: |
@@ -196,6 +207,13 @@ jobs:
           echo "go mod download failed after 5 attempts" >&2
           exit 1
 
+      - name: Save Go module cache
+        if: matrix.platform == 'amd64' && steps.go-mod-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.go-env.outputs.modcache }}
+          key: ${{ steps.go-mod-cache.outputs.cache-primary-key }}
+
       - name: Build s-ui
         run: |
           set -e
@@ -249,6 +267,18 @@ jobs:
           cache: false
           go-version-file: go.mod
 
+      - name: Locate Go module cache
+        id: go-env
+        shell: bash
+        run: echo "modcache=$(go env GOMODCACHE)" >> "$GITHUB_OUTPUT"
+
+      - name: Restore Go module cache
+        id: go-mod-cache
+        uses: actions/cache/restore@v6
+        with:
+          path: ${{ steps.go-env.outputs.modcache }}
+          key: go-mod-${{ runner.os }}-${{ hashFiles('go.sum') }}
+
       - name: Install zip for Windows
         if: matrix.arch == 'amd64'
         shell: powershell
@@ -282,6 +312,13 @@ jobs:
           mkdir s-ui-windows
           cp sui.exe s-ui-windows/
           cp -r windows/* s-ui-windows/
+
+      - name: Save Go module cache
+        if: runner.os == 'Windows' && steps.go-mod-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v6
+        with:
+          path: ${{ steps.go-env.outputs.modcache }}
+          key: ${{ steps.go-mod-cache.outputs.cache-primary-key }}
 
       - name: Download libcronet-go
         shell: bash

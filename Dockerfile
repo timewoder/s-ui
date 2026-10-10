@@ -31,6 +31,10 @@ RUN CRONET_ARCH="$TARGETARCH" && \
     wget -q -O ./libcronet.so "$CRONET_URL" && \
     chmod 755 ./libcronet.so
 
+# Modules in their own layer, so a source-only change keeps them cached.
+COPY go.mod go.sum ./
+RUN go mod download
+
 COPY . .
 COPY --from=front-builder /app/dist/ /app/web/html/
 
