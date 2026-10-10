@@ -596,6 +596,13 @@ func (s *ClientService) ResetClients(tx *gorm.DB, dt int64) ([]uint, error) {
 		client.TotalDown += client.Down
 		client.Up = 0
 		client.Down = 0
+		changes = append(changes, model.Changes{
+			DateTime: dt,
+			Actor:    "ResetJob",
+			Key:      "clients",
+			Action:   "reset",
+			Obj:      clientNameJSON(client.Name),
+		})
 		if !client.Enable {
 			client.Enable = true
 			var clientInboundIds []uint
