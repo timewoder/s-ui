@@ -351,6 +351,21 @@ func tuic(u *url.URL, i int) (*map[string]interface{}, string, error) {
 }
 
 func ss(u *url.URL, i int) (*map[string]interface{}, string, error) {
+	if u.User == nil {
+		decoded, err := decodeBase64(u.Host + strings.TrimSuffix(u.Path, "/"))
+		if err != nil {
+			return nil, "", common.NewError("Unsupported shadowsocks")
+		}
+		idx := strings.LastIndex(string(decoded), "@")
+		if idx == -1 {
+			return nil, "", common.NewError("Unsupported shadowsocks")
+		}
+		legacy := *u
+		legacy.User = url.UserPassword(splitMethod(string(decoded[:idx])))
+		legacy.Host = string(decoded[idx+1:])
+		legacy.Path = ""
+		u = &legacy
+	}
 	query, _ := url.ParseQuery(u.RawQuery)
 	host, portStr, _ := net.SplitHostPort(u.Host)
 	port := 443
@@ -408,6 +423,11 @@ func ss(u *url.URL, i int) (*map[string]interface{}, string, error) {
 		}
 	}
 	return &ss, tag, nil
+}
+
+func splitMethod(userInfo string) (string, string) {
+	method, password, _ := strings.Cut(userInfo, ":")
+	return method, password
 }
 
 func parseNaiveLink(u *url.URL, i int) (*map[string]interface{}, string, error) {
